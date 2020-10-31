@@ -2,18 +2,39 @@
 // 中心点文件路径名与桶路径名（表示分成的桶个数）, vectors表示生产而成的向量组，用于各类操作
 // 一般vectors为少数采样点
 package main
+
 import (
 	"bufio"
-	"sync"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+type Empty interface {}
+type semaphore chan Empty
+
+// acquire n resources
+func (s semaphore) P(n int) {
+	e := new(Empty)
+	for i := 0; i < n; i++ {
+		s <- e
+	}
+}
+
+// release n resources
+func (s semaphore) V(n int) {
+	for i:= 0; i < n; i++{
+		<- s
+	}
+}
+
 // Kmeans Kmeans索引
 type Kmeans struct {
 	root    string
@@ -27,24 +48,47 @@ func NewKmeans() *Kmeans {
 }
 
 // 建立索引并返回建立索引后的索引位置 len表示向量维度长度,num 表示 聚簇点个数
-func (pointer *Kmeans) createIndex(path string, length int, num int) (string, error) {
-	result := make([][]float64, 0)
-	var err error
-	result, err = loadData(path, length)
+func (pointer *Kmeans) createIndex(dataPath string, length int, num int) (string, error) {
+	rd, err := ioutil.ReadDir(dataPath) 
 	if err != nil {
-		return "", errors.New("load data error")
+		fmt.Print("出错")
 	}
-	if num*256 >= len(result) {
-		return "", errors.New("数据量过少,请减少聚簇点数")
-	}
-	randArray := make([]int, num*256)
-	rand.Seed(time.Now().Unix())
-	copy(randArray, rand.Perm(len(result))[:num*256])
+	sampling := num*256 / len(rd)
 	pointer.vectors = NewFloatVectors()
-	for _, index := range randArray {
-		vector := NewFloatVector(length)
-		vector.SetVector(result[index])
-		pointer.vectors.Append(*vector)
+	var mu sync.Mutex
+	sem := make(semaphore, 3)
+	for _, fi := range rd{
+		sem.P(1)
+		fmt.Print("start\n")
+		go func(path string){
+		defer sem.V(1)
+		result := make([][]float64, 0)
+		result, err = loadData(dataPath +"/" + path, length)
+		if err != nil {
+			fmt.Print("load data error")
+		}
+		if sampling >= len(result) {
+			fmt.Print("数据量过少,请减少聚簇点数")
+		}
+		randArray := make([]int, sampling)
+		rand.Seed(time.Now().Unix())
+		copy(randArray, rand.Perm(len(result))[:sampling])
+
+		for _, index := range randArray {
+			vector := NewFloatVector(length)
+			vector.SetVector(result[index])
+			mu.Lock()
+			pointer.vectors.Append(*vector)
+			mu.Unlock()
+		}
+		fmt.Print("finish\n")
+	}(fi.Name())
+	}
+	for {
+		if len(sem) == 0{
+			fmt.Print("资源消耗完毕")
+			break
+		}
 	}
 	pointer.searchCenter(num, length)
 	return "", nil
@@ -124,60 +168,79 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 	}
 	// bucket 为桶，将每个向量储存到对应的桶中，
 	// bucketIdentifier是存储编号的桶，因为每个向量有自己的编号，这样才能对应进行搜索。
-	bucket := make([]floatVectors, num)
-	bucketIdentifier := make([][]int, num)
-	for i := range bucketIdentifier {
-		bucketIdentifier[i] = make([]int, 0)
+	rd, err := ioutil.ReadDir(dataPath) 
+	if err != nil {
+		fmt.Print("出错")
 	}
-	data, _ := loadData(dataPath, length)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	for i, floatData := range data {
-		vector := NewFloatVector(length)
-		vector.SetVector(floatData)
-		maxIndex, maxDistance := 0, -100000.0
-		// 这里可以增加并行操作
-		wg.Add(1)
-		go func(floatData []float64, i int) {
-			defer wg.Done()
-			for centerIndex, centerPoint := range pointer.center.vectors {
-				distance, err := vector.distance(centerPoint)
-				if err != nil {
-					fmt.Print(err)
-				}
-				if distance > maxDistance {
-					maxDistance = distance
-					maxIndex = centerIndex
-				}
-			}
-			mu.Lock()
-			bucket[maxIndex].Append(*vector)
-			bucketIdentifier[maxIndex] = append(bucketIdentifier[maxIndex], i)
-			defer mu.Unlock()
-			if i%1000 == 0 {
-				fmt.Printf("编号:%d运行完毕", i)
-			}
-		}(floatData, i)
+	err = os.Mkdir(bucketPath, os.ModePerm)
+	if err != nil {
+		fmt.Print("bucket 已经加载")
 	}
-	wg.Wait()
+	count := 0
+	for _, fi := range rd{
+		bucket := make([]floatVectors, num)
+		bucketIdentifier := make([][]int, num)
+		for i := range bucketIdentifier {
+			bucketIdentifier[i] = make([]int, 0)
+		}
+		data, _ := loadData(dataPath+ "/" + fi.Name(), length)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		for _, floatData := range data {
+			// 这里可以增加并行操作
+			wg.Add(1)
+			go func(floatData []float64) {
+				defer wg.Done()
+				maxIndex, maxDistance := 0, -100000.0
+				vector := NewFloatVector(length)
+				vector.SetVector(floatData)
+				for centerIndex, centerPoint := range pointer.center.vectors {
+					distance, err := vector.distance(centerPoint)
+					if err != nil {
+						fmt.Print(err)
+					}
+					if distance > maxDistance {
+						maxDistance = distance
+						maxIndex = centerIndex
+					}
+				}
+				mu.Lock()
+				bucket[maxIndex].Append(*vector)
+				bucketIdentifier[maxIndex] = append(bucketIdentifier[maxIndex], count)
+				count ++
+				mu.Unlock()
+				if count%5000 == 0 {
+					fmt.Printf("编号:%d运行完毕", count)
+				}
+			}(floatData)
+		}
+		wg.Wait()
+		for i, bucketVector := range bucket {
+			wg.Add(1)
+			go func(i int, bucketVector floatVectors){
+				defer wg.Done()
+				fmt.Printf("桶长度：%d\n",bucketVector.len)
+				outputFile, outputError := os.OpenFile("./"+bucketPath+"/"+strconv.Itoa(i)+".txt",
+				os.O_RDWR|os.O_CREATE|os.O_APPEND,0644)
+				if outputError != nil {
+					fmt.Printf("An error occurred with file opening or creation\n")
+				}
+				defer outputFile.Close()
+				outputWriter := bufio.NewWriter(outputFile)
+				for j := 0; j < bucketVector.len; j++ {
+					mu.Lock()
+					outputWriter.WriteString(strconv.Itoa(bucketIdentifier[i][j]) + ":")
+					outputWriter.WriteString(bucketVector.vectorString(j))
+					mu.Unlock()
+				}
+				outputWriter.Flush()
+			}(i, bucketVector)
+		}
+		wg.Wait()
+	}
+	
 	// 将每个聚簇点分桶存储
-	os.Mkdir(bucketPath, os.ModePerm)
-	for i, bucketVector := range bucket {
-		fmt.Print("./" + bucketPath + "/" + strconv.Itoa(i) + ".txt")
-		outputFile, outputError := os.OpenFile("./"+bucketPath+"/"+strconv.Itoa(i)+".txt",
-			os.O_WRONLY|os.O_CREATE, 0666)
-		if outputError != nil {
-			fmt.Printf("An error occurred with file opening or creation\n")
-			return false, nil
-		}
-		defer outputFile.Close()
-		outputWriter := bufio.NewWriter(outputFile)
-		for j := 0; j < bucketVector.len; j++ {
-			outputWriter.WriteString(strconv.Itoa(bucketIdentifier[i][j]) + ":")
-			outputWriter.WriteString(bucketVector.vectorString(j))
-		}
-		outputWriter.Flush()
-	}
+
 	// 存储中心点
 	outputFile, outputError := os.OpenFile("./"+bucketPath+"/center.txt",
 		os.O_WRONLY|os.O_CREATE, 0666)
@@ -293,4 +356,10 @@ func (pointer *Kmeans) searchVector(inputVector floatVector, root string) (int, 
 	}
 	wg.Wait()
 	return maxIndex, *maxVector, maxDistance
+}
+
+func main() {
+	kmeans := NewKmeans()
+	kmeans.createIndex("../data", 1024, 20)
+	kmeans.storeIndex("../data", 1024, "bucket", 20)
 }

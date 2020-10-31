@@ -10,7 +10,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // 浮点向量
@@ -158,37 +157,4 @@ func loadData(path string, length int) ([][]float64, error) {
 	return vectors, nil
 }
 
-func main() {
-	// kmeans := NewKmeans()
-	// kmeans.createIndex("../0.txt", 1024, 10)
-	// kmeans.storeIndex("../0.txt", 1024, "bucket", 10)
-	// 随机选取几个进行测试
-	testFloats, err := loadData("../0.txt", 1024)
-	if err != nil {
-		fmt.Print("出现错误")
-		return
-	}
-	maxDistance := -100000.0
-	startTime := time.Now().UnixNano()
-	for i, inputFloat := range testFloats {
-		if i%100 != 0 {
-			continue
-		}
-		vector := NewFloatVector(1024)
-		matchFloats,_ := loadData("../0.txt", 1024)
-		vector.SetVector(inputFloat)
-		for _, matchFloat := range matchFloats{
-			matchVector := NewFloatVector(1024)
-			matchVector.SetVector(matchFloat)
-			distance , _ := vector.distance(*matchVector)
-			if distance > maxDistance{
-			 maxDistance = distance
-			}
-		}
-		break
-	}
-	endTime := time.Now().UnixNano()
-	seconds := float64((endTime - startTime) / 1e9)
-	fmt.Printf("用时:%f", seconds)
-	fmt.Print("程序结束")
-}
+
