@@ -1,15 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
-	"fmt"
-	"io"
 	"math"
-	"os"
 	"strconv"
-	"strings"
 )
 
 // 浮点向量
@@ -27,13 +22,25 @@ func (pointer *floatVector) GetModule() float64 {
 	return math.Sqrt(sum)
 }
 
+// 对向量进行切片
+func (pointer *floatVector) cutVector(length int, start int ,end int) (result *floatVector){
+	result = NewFloatVector(length)
+	result.SetVector(pointer.vector[start:end])
+	return result
+}
+
 // 向量特征相加
 func (pointer *floatVector) addVector(inputVector floatVector) {
 	for i := 0; i < inputVector.len; i++ {
 		pointer.vector[i] += inputVector.vector[i]
 	}
 }
-
+// 向量特征相减
+func (pointer *floatVector) subVector(inputVector floatVector) {
+	for i := 0; i < inputVector.len; i++ {
+		pointer.vector[i] -= inputVector.vector[i]
+	} 
+}
 // 向量特征除以某个数
 func (pointer *floatVector) divVector(divisor int) error {
 	if divisor == 0 {
@@ -105,10 +112,27 @@ func (pointer *floatVectors) Append(input floatVector) {
 	pointer.len++
 }
 
+// subVector 对向量组每个向量进行减法
+func (pointer *floatVectors) subVector(input floatVector) {
+	for i := 0; i < pointer.len; i++{
+		pointer.vectors[i].subVector(input)
+	}
+}
+
+
 // 返回某个向量的string
 func (pointer *floatVectors) vectorString(index int) string {
 	vector := pointer.vectors[index]
 	return vector.toString()
+}
+
+// 对整个floatVectors进行切片
+func(pointer *floatVectors) cutVectors(length int,start int, end int) (result *floatVectors){
+	result = NewFloatVectors()
+	for _, vector := range(pointer.vectors){
+		result.Append(*vector.cutVector(length, start, end))
+	}
+	return result
 }
 
 // NewFloatVectors 向外生产一个向量组
@@ -125,36 +149,6 @@ type Index interface {
 }
 
 
-// path为向量路径， len为向量产生长度
-func loadData(path string, length int) ([][]float64, error) {
-	inputFile, inputError := os.Open(path)
-	if inputError != nil {
-		fmt.Print("文件似乎不存在")
-		return nil, errors.New("Load file error")
-	}
-	defer inputFile.Close()
-	vectors := make([][]float64, 0)
-	inputReader := bufio.NewReader(inputFile)
-	for {
-		var vectorElement float64
-		vector := make([]float64, length)
-		inputString, readerError := inputReader.ReadString('\n')
-		if readerError == io.EOF {
-			break
-		}
-		inputString = inputString[:len(inputString)-1]
-		stringSplit := strings.Split(inputString, ",")
-		for i, element := range stringSplit {
-			if i >= length {
-				return nil, errors.New("vectors' dim error")
-			}
-			vectorElement, _ = strconv.ParseFloat(element, 64)
-			vector[i] = vectorElement
-		}
-		vectors = append(vectors, vector)
 
-	}
-	return vectors, nil
-}
 
 

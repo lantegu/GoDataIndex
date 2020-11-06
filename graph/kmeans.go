@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-type Empty interface {}
+type Empty interface{}
 type semaphore chan Empty
 
 // acquire n resources
@@ -30,8 +30,8 @@ func (s semaphore) P(n int) {
 
 // release n resources
 func (s semaphore) V(n int) {
-	for i:= 0; i < n; i++{
-		<- s
+	for i := 0; i < n; i++ {
+		<-s
 	}
 }
 
@@ -49,43 +49,43 @@ func NewKmeans() *Kmeans {
 
 // 建立索引并返回建立索引后的索引位置 len表示向量维度长度,num 表示 聚簇点个数
 func (pointer *Kmeans) createIndex(dataPath string, length int, num int) (string, error) {
-	rd, err := ioutil.ReadDir(dataPath) 
+	rd, err := ioutil.ReadDir(dataPath)
 	if err != nil {
 		fmt.Print("出错")
 	}
-	sampling := num*256 / len(rd)
+	sampling := num * 256 / len(rd)
 	pointer.vectors = NewFloatVectors()
 	var mu sync.Mutex
 	sem := make(semaphore, 3)
-	for _, fi := range rd{
+	for _, fi := range rd {
 		sem.P(1)
 		fmt.Print("start\n")
-		go func(path string){
-		defer sem.V(1)
-		result := make([][]float64, 0)
-		result, err = loadData(dataPath +"/" + path, length)
-		if err != nil {
-			fmt.Print("load data error")
-		}
-		if sampling >= len(result) {
-			fmt.Print("数据量过少,请减少聚簇点数")
-		}
-		randArray := make([]int, sampling)
-		rand.Seed(time.Now().Unix())
-		copy(randArray, rand.Perm(len(result))[:sampling])
+		go func(path string) {
+			defer sem.V(1)
+			result := make([][]float64, 0)
+			result, err = loadData(dataPath+"/"+path, length)
+			if err != nil {
+				fmt.Print("load data error")
+			}
+			if sampling >= len(result) {
+				fmt.Print("数据量过少,请减少聚簇点数")
+			}
+			randArray := make([]int, sampling)
+			rand.Seed(time.Now().Unix())
+			copy(randArray, rand.Perm(len(result))[:sampling])
 
-		for _, index := range randArray {
-			vector := NewFloatVector(length)
-			vector.SetVector(result[index])
-			mu.Lock()
-			pointer.vectors.Append(*vector)
-			mu.Unlock()
-		}
-		fmt.Print("finish\n")
-	}(fi.Name())
+			for _, index := range randArray {
+				vector := NewFloatVector(length)
+				vector.SetVector(result[index])
+				mu.Lock()
+				pointer.vectors.Append(*vector)
+				mu.Unlock()
+			}
+			fmt.Print("finish\n")
+		}(fi.Name())
 	}
 	for {
-		if len(sem) == 0{
+		if len(sem) == 0 {
 			fmt.Print("资源消耗完毕")
 			break
 		}
@@ -103,61 +103,8 @@ func (pointer *Kmeans) searchCenter(num int, length int) error {
 		return errors.New("中心数据已产生，无需搜索")
 	}
 	vectors := pointer.vectors
-	// 这个等会移到最后
-	pointer.center = NewFloatVectors()
-	// 生成随机数
-	randArray := make([]int, num)
-	rand.Seed(time.Now().Unix())
-	copy(randArray, rand.Perm(vectors.len)[:num])
-	// 随机选取num个聚簇点作为初始聚簇中心
-	for _, index := range randArray {
-		vector := NewFloatVector(length)
-		vector.SetVector(vectors.vectors[index].vector)
-		pointer.center.Append(*vector)
-	}
-	// 计算每个样本点最近的簇心点,迭代500次
-	for i := 0; i < 500; i++ {
-		// 遍历每个样本点，求离样本点最近的中心
-		neighbor := make([]int, vectors.len)
-		// 这里可以设计协程，用于计算每个路径的最近邻居
-		var wg sync.WaitGroup
-		for index, vector := range vectors.vectors {
-			wg.Add(1)
-			go func(index int, vector floatVector) {
-				defer wg.Done()
-				maxIndex, maxDistance := 0, -100000.0
-				for centerIndex, centerPoint := range pointer.center.vectors {
-					distance, err := vector.distance(centerPoint)
-					if err != nil {
-						fmt.Print("计算出错")
-					}
-					if distance > maxDistance {
-						maxDistance = distance
-						maxIndex = centerIndex
-					}
-				}
-				neighbor[index] = maxIndex
-			}(index, vector)
-		}
-		wg.Wait()
-		// 重新计算每个簇的中心
-		//count用来存储每个聚簇中心点的个数
-		// 聚簇中心数据清零
-		for j := 0; j < pointer.center.len; j++ {
-			pointer.center.vectors[j].resetVector()
-		}
-		count := make([]int, num)
-		// 此处两个函数添加sem并行
-		for j, neigh := range neighbor {
-			count[neigh]++
-			pointer.center.vectors[neigh].addVector(vectors.vectors[j])
-		}
-		for j := 0; j < pointer.center.len; j++ {
-			pointer.center.vectors[j].divVector(count[j])
-		}
-		fmt.Printf("聚类次数:%d", i)
-	}
-
+	pointer.center = searchCenter(num, length, vectors, 0)
+	
 	return nil
 }
 
@@ -168,7 +115,7 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 	}
 	// bucket 为桶，将每个向量储存到对应的桶中，
 	// bucketIdentifier是存储编号的桶，因为每个向量有自己的编号，这样才能对应进行搜索。
-	rd, err := ioutil.ReadDir(dataPath) 
+	rd, err := ioutil.ReadDir(dataPath)
 	if err != nil {
 		fmt.Print("出错")
 	}
@@ -177,13 +124,18 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 		fmt.Print("bucket 已经加载")
 	}
 	count := 0
-	for _, fi := range rd{
+	listDirs := make([]string, 0)
+	for _, fi := range rd {
+		listDirs = append(listDirs, fi.Name())
+	}
+	listDirs = dirSort(listDirs)
+	for _, listDir := range listDirs {
 		bucket := make([]floatVectors, num)
 		bucketIdentifier := make([][]int, num)
 		for i := range bucketIdentifier {
 			bucketIdentifier[i] = make([]int, 0)
 		}
-		data, _ := loadData(dataPath+ "/" + fi.Name(), length)
+		data, _ := loadData(dataPath+"/"+listDir, length)
 		var wg sync.WaitGroup
 		var mu sync.Mutex
 		for _, floatData := range data {
@@ -207,7 +159,7 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 				mu.Lock()
 				bucket[maxIndex].Append(*vector)
 				bucketIdentifier[maxIndex] = append(bucketIdentifier[maxIndex], count)
-				count ++
+				count++
 				mu.Unlock()
 				if count%5000 == 0 {
 					fmt.Printf("编号:%d运行完毕", count)
@@ -217,11 +169,11 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 		wg.Wait()
 		for i, bucketVector := range bucket {
 			wg.Add(1)
-			go func(i int, bucketVector floatVectors){
+			go func(i int, bucketVector floatVectors) {
 				defer wg.Done()
-				fmt.Printf("桶长度：%d\n",bucketVector.len)
+				fmt.Printf("桶长度：%d\n", bucketVector.len)
 				outputFile, outputError := os.OpenFile("./"+bucketPath+"/"+strconv.Itoa(i)+".txt",
-				os.O_RDWR|os.O_CREATE|os.O_APPEND,0644)
+					os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 				if outputError != nil {
 					fmt.Printf("An error occurred with file opening or creation\n")
 				}
@@ -238,7 +190,7 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 		}
 		wg.Wait()
 	}
-	
+
 	// 将每个聚簇点分桶存储
 
 	// 存储中心点
@@ -257,8 +209,6 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 	outputWriter.Flush()
 	return true, nil
 }
-
-
 
 // 调用查询函数查询与特征最接近的向量
 func (pointer *Kmeans) searchVector(inputVector floatVector, root string) (int, floatVector, float64) {
@@ -356,10 +306,4 @@ func (pointer *Kmeans) searchVector(inputVector floatVector, root string) (int, 
 	}
 	wg.Wait()
 	return maxIndex, *maxVector, maxDistance
-}
-
-func main() {
-	kmeans := NewKmeans()
-	kmeans.createIndex("../data", 1024, 20)
-	kmeans.storeIndex("../data", 1024, "bucket", 20)
 }
