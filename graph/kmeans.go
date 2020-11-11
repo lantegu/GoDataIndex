@@ -56,7 +56,7 @@ func (pointer *Kmeans) createIndex(dataPath string, length int, num int) (string
 	sampling := num * 256 / len(rd)
 	pointer.vectors = NewFloatVectors()
 	var mu sync.Mutex
-	sem := make(semaphore, 3)
+	sem := make(semaphore, 2)
 	for _, fi := range rd {
 		sem.P(1)
 		fmt.Print("start\n")

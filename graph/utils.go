@@ -14,17 +14,15 @@ import (
 	"time"
 )
 
-
-
-func dirSort(listDirs []string) []string{
-	intListDirs := make([]int ,len(listDirs))
+func dirSort(listDirs []string) []string {
+	intListDirs := make([]int, len(listDirs))
 	result := make([]string, len(listDirs))
-	for i, listDir := range(listDirs){
+	for i, listDir := range listDirs {
 		listDir = listDir[:strings.Index(listDir, ".")]
 		intListDirs[i], _ = strconv.Atoi(listDir)
-	} 
+	}
 	sort.Ints(intListDirs)
-	for i, intListDir := range(intListDirs){
+	for i, intListDir := range intListDirs {
 		result[i] = strconv.Itoa(intListDir) + ".txt"
 	}
 
@@ -32,7 +30,7 @@ func dirSort(listDirs []string) []string{
 }
 
 // stringToFloats表示将字符串转换为浮点数组
-func stringToFloats(data string, length int) ([] float64, error){
+func stringToFloats(data string, length int) ([]float64, error) {
 	vector := make([]float64, length)
 	stringSplit := strings.Split(data, ",")
 	stringSplit = stringSplit[:len(stringSplit)-1]
@@ -47,7 +45,7 @@ func stringToFloats(data string, length int) ([] float64, error){
 }
 
 // loadBucket 载入桶 path表示桶路径 length表示桶
-func loadBucket(path string, length int) (indexs []int, vectors [][]float64,err error){
+func loadBucket(path string, length int) (indexs []int, vectors [][]float64, err error) {
 	indexs = make([]int, 0)
 	inputFile, inputError := os.Open(path)
 	if inputError != nil {
@@ -89,15 +87,16 @@ func loadData(path string, length int) ([][]float64, error) {
 		if readerError == io.EOF {
 			break
 		}
-		inputString = inputString[strings.Index(inputString, ":")+1:len(inputString)-1]
+		inputString = inputString[strings.Index(inputString, ":")+1 : len(inputString)-1]
 		vector, _ = stringToFloats(inputString, length)
 		vectors = append(vectors, vector)
 	}
 	return vectors, nil
 }
+
 // 聚类算法不一定要依赖Kmeans流程，其他也要用 num表示聚类点数 length表示向量维度 vectors 表示采样点
 // center表示采样结果
-func searchCenter(num int, length int,vectors *floatVectors,codeNum int) *floatVectors {
+func searchCenter(num int, length int, vectors *floatVectors, codeNum int) *floatVectors {
 	center := NewFloatVectors()
 	// 随机选取num个聚簇点作为初始聚簇中心
 	randArray := make([]int, num)
@@ -108,7 +107,7 @@ func searchCenter(num int, length int,vectors *floatVectors,codeNum int) *floatV
 		vector.SetVector(vectors.vectors[index].vector)
 		center.Append(*vector)
 	}
-	for i := 0; i < 500; i++ {
+	for i := 0; i < 5; i++ {
 		neighbor := make([]int, vectors.len)
 		var wg sync.WaitGroup
 		for index, vector := range vectors.vectors {
@@ -145,14 +144,14 @@ func searchCenter(num int, length int,vectors *floatVectors,codeNum int) *floatV
 		for j := 0; j < center.len; j++ {
 			center.vectors[j].divVector(count[j])
 		}
-		if i%100 == 0{
+		if i%100 == 0 {
 			fmt.Printf("聚心%d运行%d次", codeNum, i)
 		}
 	}
 	return center
 }
 
-func loadCenter(path string) *floatVectors{
+func loadCenter(path string) *floatVectors {
 	inputFile, inputError := os.Open(path)
 	if inputError != nil {
 		fmt.Printf("An error occurred on opening the inputfile\n" +
@@ -182,7 +181,7 @@ func loadCenter(path string) *floatVectors{
 	return center
 }
 
-func loadPqcenter(path string, M int) [](*floatVectors){
+func loadPqcenter(path string, M int) [](*floatVectors) {
 	pqCenter := make([]*floatVectors, M)
 	inputFile, inputError := os.Open(path)
 	if inputError != nil {
@@ -199,11 +198,11 @@ func loadPqcenter(path string, M int) [](*floatVectors){
 		if readerError == io.EOF {
 			break
 		}
-		if inputString == "||\n"{
+		if inputString == "||\n" {
 			pqCenter[row] = center
 			center = NewFloatVectors()
 			row++
-		}else{
+		} else {
 			inputFloatArray := make([]float64, 0)
 			tempString := strings.Split(inputString, ",")
 			tempString = tempString[:len(tempString)-1]

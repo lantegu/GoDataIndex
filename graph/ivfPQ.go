@@ -290,22 +290,24 @@ func (pointer *IvfPQ) searchVector(inputVector floatVector,length int ,root stri
 
 func main() {
 	
-	lijun, _ := loadData("./0_18.txt", 1024)
-	vector := NewFloatVector(1024)
+
 	// kmeans 方法求距离 索引
-	//kmeans := NewKmeans()
+	kmeans := NewKmeans()
+	kmeans.createIndex("../data", 1024, 20)
+	kmeans.storeIndex("../data", 1024, "bucket", 20)
+	// lijun, _ := loadData("./0_18.txt", 1024)
+	// vector := NewFloatVector(1024)
 	// for _, floatvector := range(lijun){
 	// 	vector.SetVector(floatvector)
 	// 	index, _, distance  := kmeans.searchVector(*vector, "bucket")
 	// 	fmt.Print(index, distance)
 	// }
-	kivfPq := NewIvfPQ(8)
-	for _, floatvector := range(lijun){
-		vector.SetVector(floatvector)
-		index, distance  := kivfPq.searchVector(*vector, 1024, ".")
-		fmt.Printf("索引号：%d, 距离：%f\n", index, distance)
-	}
-	// kmeans.createIndex("../data", 1024, 20, 20, true)
-	// kmeans.storeIndex(".", 1024, 20)
+	// kivfPq := NewIvfPQ(8)
+	// for _, floatvector := range(lijun){
+	// 	vector.SetVector(floatvector)
+	// 	index, distance  := kivfPq.searchVector(*vector, 1024, ".")
+	// 	fmt.Printf("索引号：%d, 距离：%f\n", index, distance)
+	// }
+
 
 }
