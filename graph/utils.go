@@ -107,7 +107,7 @@ func searchCenter(num int, length int, vectors *floatVectors, codeNum int) *floa
 		vector.SetVector(vectors.vectors[index].vector)
 		center.Append(*vector)
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 500; i++ {
 		neighbor := make([]int, vectors.len)
 		var wg sync.WaitGroup
 		for index, vector := range vectors.vectors {
