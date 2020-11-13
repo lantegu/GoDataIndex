@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -124,13 +122,14 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 	if err != nil {
 		fmt.Print("bucket 已经加载")
 	}
-	count := 0
 	// 对csv文件进行排序，默认是按字符串顺序排序，我们按照数值排序
 	listDirs := make([]string, 0)
 	for _, fi := range rd {
 		listDirs = append(listDirs, fi.Name())
 	}
 	listDirs = dirSort(listDirs)
+	// 记录总数 因为是多个文件
+	count := 0
 	for _, listDir := range listDirs {
 		bucket := make([]floatVectors, num)
 		bucketIdentifier := make([][]int, num)
@@ -140,9 +139,9 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 		data, _ := loadData(dataPath+"/"+listDir, length)
 		var wg sync.WaitGroup
 		var mu sync.Mutex
-		for _, floatData := range data {
+		for i, floatData := range data {
 			wg.Add(1)
-			go func(floatData []float64) {
+			go func(floatData []float64, i int) {
 				defer wg.Done()
 				maxIndex, maxDistance := 0, -100000.0
 				vector := NewFloatVector(length)
@@ -159,14 +158,12 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 				}
 				mu.Lock()
 				bucket[maxIndex].Append(*vector)
-				bucketIdentifier[maxIndex] = append(bucketIdentifier[maxIndex], count)
-				count++
+				bucketIdentifier[maxIndex] = append(bucketIdentifier[maxIndex], i)
 				mu.Unlock()
-				if count%10000 == 0 {
-					fmt.Printf("编号:%d运行完毕", count)
-				}
-			}(floatData)
+
+			}(floatData, i+count)
 		}
+		count += len(data)
 		wg.Wait()
 		for i, bucketVector := range bucket {
 			wg.Add(1)
@@ -202,23 +199,23 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 	defer outputFile.Close()
 	outputWriter := csv.NewWriter(outputFile)
 	for j := 0; j < pointer.center.length; j++ {
-		outputstrings := pointer.center.vectorString(j)
-		outputstrings = append([]string {strconv.Itoa(j)}, outputstrings...)
-		outputWriter.Write(outputstrings)
+		outputStrings := pointer.center.vectorString(j)
+		outputStrings = append([]string {strconv.Itoa(j)}, outputStrings...)
+		outputWriter.Write(outputStrings)
 	}
 	outputWriter.Flush()
 	return true, nil
 }
 
-// 调用查询函数查询与特征最接近的向量
-func (pointer *Kmeans) searchVector(inputVector floatVector, root string) (int, floatVector, float64) {
+// 调用查询函数查询与特征最接近的向量 inputvect为输入的待搜索向量， root 为文件路径 length为向量维度
+func (pointer *Kmeans) searchVector(inputVector floatVector, root string, length int) (int, floatVector, float64) {
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		fmt.Print("文件不存在")
 	}
 	pointer.root = root
 	// 如果还没有聚簇点，那么加载聚簇点
 	if pointer.center == nil {
-		inputFile, inputError := os.Open(root + "/center.txt")
+		inputFile, inputError := os.Open(root + "/center.csv")
 		if inputError != nil {
 			fmt.Printf("An error occurred on opening the inputfile\n" +
 				"Does the file exist?\n" +
@@ -226,21 +223,19 @@ func (pointer *Kmeans) searchVector(inputVector floatVector, root string) (int, 
 		}
 		defer inputFile.Close()
 		pointer.center = NewFloatVectors()
-		inputReader := bufio.NewReader(inputFile)
+		inputReader := csv.NewReader(inputFile)
 		for {
-			inputString, readerError := inputReader.ReadString('\n')
+			inputString, readerError := inputReader.Read()
 			if readerError == io.EOF {
 				break
 			}
-			inputString = inputString[strings.Index(inputString, ":")+1:]
-			inputFloatArray := make([]float64, 0)
-			tempString := strings.Split(inputString, ",")
-			tempString = tempString[:len(tempString)-1]
-			for _, element := range tempString {
+			inputString = inputString[1:]
+			inputFloatArray := make([]float64, length)
+			for i, element := range inputString {
 				inputFloat, _ := strconv.ParseFloat(element, 64)
-				inputFloatArray = append(inputFloatArray, inputFloat)
+				inputFloatArray[i] = inputFloat
 			}
-			vector := NewFloatVector(1024)
+			vector := NewFloatVector(length)
 			vector.SetVector(inputFloatArray)
 			pointer.center.Append(*vector)
 		}
@@ -258,35 +253,33 @@ func (pointer *Kmeans) searchVector(inputVector floatVector, root string) (int, 
 		}
 	}
 	// 加载相应的桶
-	inputFile, inputError := os.Open(root + "/" + strconv.Itoa(maxIndex) + ".txt")
+	inputFile, inputError := os.Open(root + "/" + strconv.Itoa(maxIndex) + ".csv")
 	if inputError != nil {
 		fmt.Printf("An error occurred on opening the inputfile\n" +
 			"Does the file exist?\n" +
 			"Have you got acces to it?\n")
 	}
 	defer inputFile.Close()
-	inputReader := bufio.NewReader(inputFile)
+	inputReader := csv.NewReader(inputFile)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	maxIndex, maxDistance = 0, -100000.0
 	maxVector := NewFloatVector(1024)
 	// 加载桶内每个向量与目标向量做匹配
 	for {
-		inputString, readerError := inputReader.ReadString('\n')
+		inputString, readerError := inputReader.Read()
 		if readerError == io.EOF {
 			break
 		}
-		indexString := inputString[:strings.Index(inputString, ":")]
+		indexString := inputString[0]
 		index, _ := strconv.Atoi(indexString)
-		inputString = inputString[strings.Index(inputString, ":")+1:]
-		inputFloatArray := make([]float64, 0)
-		tempString := strings.Split(inputString, ",")
-		tempString = tempString[:len(tempString)-1]
-		for _, element := range tempString {
+		inputString = inputString[1:]
+		inputFloatArray := make([]float64, length)
+		for i, element := range inputString {
 			inputFloat, _ := strconv.ParseFloat(element, 64)
-			inputFloatArray = append(inputFloatArray, inputFloat)
+			inputFloatArray[i] = inputFloat
 		}
-		vector := NewFloatVector(1024)
+		vector := NewFloatVector(length)
 		vector.SetVector(inputFloatArray)
 		wg.Add(1)
 		go func(index int, vector floatVector) {

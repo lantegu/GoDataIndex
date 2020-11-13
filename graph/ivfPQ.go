@@ -1,16 +1,16 @@
 package main
 
 import (
-	"bufio"
+	"encoding/csv"
 	//"encoding/csv"
 	"fmt"
 	"io"
 	"io/ioutil"
+
 	//"log"
 	"math/rand"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -53,7 +53,7 @@ func (pointer *IvfPQ) createIndex(dataPath string, length int, num int, pqNum in
 		kmeans.createIndex(dataPath, length, num)
 		kmeans.storeIndex(dataPath, length, "bucket", num)
 	} else {
-		centerFloat, _ := loadData("bucket/center.txt", 1024)
+		centerFloat, _ := loadData("bucket/center.csv", 1024)
 		vectors := NewFloatVectors()
 		for _, vectorFloat := range centerFloat {
 			vector := NewFloatVector(length)
@@ -71,7 +71,7 @@ func (pointer *IvfPQ) createIndex(dataPath string, length int, num int, pqNum in
 	// 为bucket下的目录排序，按数值，略过center文件
 	listDirs := make([]string, 0)
 	for _, fi := range rd {
-		if fi.Name() == "center.txt" {
+		if fi.Name() == "center.csv" {
 			continue
 		}
 		listDirs = append(listDirs, fi.Name())
@@ -140,7 +140,7 @@ func (pointer *IvfPQ) storeIndex(dataPath string, length int, pqnum int) {
 	dim := length / pointer.M
 	listDirs := make([]string, 0)
 	for _, fi := range rd {
-		if fi.Name() == "center.txt" {
+		if fi.Name() == "center.csv" {
 			continue
 		}
 		listDirs = append(listDirs, fi.Name())
@@ -158,13 +158,13 @@ func (pointer *IvfPQ) storeIndex(dataPath string, length int, pqnum int) {
 		fmt.Printf("start encoding bucket:%d\n", i)
 		go func(i int, listDir string) {
 			defer sem.V(1)
-			outputFile, outputError := os.OpenFile(dataPath+"/pqCode/"+strconv.Itoa(i)+".txt",
+			outputFile, outputError := os.OpenFile(dataPath+"/pqCode/"+strconv.Itoa(i)+".csv",
 				os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 			if outputError != nil {
 				fmt.Printf("An error occurred with file opening or creation\n")
 			}
 			defer outputFile.Close()
-			outputWriter := bufio.NewWriter(outputFile)
+			outputWriter := csv.NewWriter(outputFile)
 			indexs, data, _ := loadBucket(dataPath+"/bucket/"+listDir, length)
 			for j, floatData := range data {
 				vector := NewFloatVector(length)
@@ -186,9 +186,9 @@ func (pointer *IvfPQ) storeIndex(dataPath string, length int, pqnum int) {
 					}(k)
 				}
 				wg.Wait()
-				outputWriter.WriteString(strconv.Itoa(indexs[j]) + ":")
-				outputWriter.WriteString(strings.Join(code, " "))
-				outputWriter.WriteString("\n")
+				outputStrings := make([]string, 0)
+				outputStrings = append([]string{strconv.Itoa(indexs[j])},code...)
+				outputWriter.Write(outputStrings)
 				if j%4000 == 0 {
 					fmt.Printf("第:%d个桶第%d个编码完成\n", i, j)
 				}
@@ -204,7 +204,7 @@ func (pointer *IvfPQ) storeIndex(dataPath string, length int, pqnum int) {
 		}
 	}
 	// 保存量化聚簇中心的txt
-	centerFile, centerError := os.OpenFile(dataPath+"/pqCode/"+"center.txt",
+	centerFile, centerError := os.OpenFile(dataPath+"/pqCode/"+"center.csv",
 		os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if centerError != nil {
 		fmt.Printf("An error occurred with file opening or creation\n")
@@ -213,12 +213,13 @@ func (pointer *IvfPQ) storeIndex(dataPath string, length int, pqnum int) {
 		fmt.Print("文件创建出错")
 	}
 	defer centerFile.Close()
-	outputWriter := bufio.NewWriter(centerFile)
+	outputWriter := csv.NewWriter(centerFile)
 	for i := 0; i < pointer.M; i++ {
 		for j := 0; j < pointer.pqCenter[i].length; j++ {
-			//outputWriter.WriteString(pointer.pqCenter[i].vectorString(j))
+			outputWriter.Write(pointer.pqCenter[i].vectorString(j))
 		}
-		outputWriter.WriteString("||\n")
+		// 记录M的分割位置
+		outputWriter.Write([]string{"||"})
 	}
 	outputWriter.Flush()
 }
@@ -229,17 +230,18 @@ func (pointer *IvfPQ) searchVector(inputVector floatVector, length int, root str
 		fmt.Print("文件不存在")
 	}
 	if pointer.center == nil {
-		pointer.center = loadCenter(root + "/bucket/center.txt")
+		pointer.center = loadCenter(root + "/bucket/center.csv")
 	}
 	if pointer.pqCenter == nil {
 		pointer.pqCenter = make([]*floatVectors, pointer.M)
-		pointer.pqCenter = loadPqcenter(root+"/pqCode/center.txt", pointer.M)
+		pointer.pqCenter = loadPqcenter(root+"/pqCode/center.csv", pointer.M)
 	}
 	dim := length / pointer.M
 	pqList := make([][]float64, pointer.M)
 	for i := range pqList {
 		pqList[i] = make([]float64, 0)
 	}
+	// 记录输入向量与pa聚心的距离
 	for i := 0; i < pointer.M; i++ {
 		tempvector, _ := inputVector.cutVector(dim, i*dim, (i+1)*dim)
 		for _, vector := range pointer.pqCenter[i].vectors {
@@ -247,6 +249,7 @@ func (pointer *IvfPQ) searchVector(inputVector floatVector, length int, root str
 			pqList[i] = append(pqList[i], distance)
 		}
 	}
+	// 找到最近粗聚点
 	maxIndex, maxDistance := 0, -100000.0
 	for index, vector := range pointer.center.vectors {
 		distance, err := vector.distance(inputVector)
@@ -258,27 +261,25 @@ func (pointer *IvfPQ) searchVector(inputVector floatVector, length int, root str
 			maxIndex = index
 		}
 	}
-	inputFile, inputError := os.Open(root + "/pqCode/" + strconv.Itoa(maxIndex) + ".txt")
+	inputFile, inputError := os.Open(root + "/pqCode/" + strconv.Itoa(maxIndex) + ".csv")
 	if inputError != nil {
 		fmt.Printf("An error occurred on opening the inputfile\n" +
 			"Does the file exist?\n" +
 			"Have you got acces to it?\n")
 	}
 	defer inputFile.Close()
-	inputReader := bufio.NewReader(inputFile)
+	inputReader := csv.NewReader(inputFile)
 	maxIndex, maxDistance = 0, -100000.0
 	for {
-		inputString, readerError := inputReader.ReadString('\n')
+		inputString, readerError := inputReader.Read()
 		if readerError == io.EOF {
 			break
 		}
-		indexString := inputString[:strings.Index(inputString, ":")]
+		indexString := inputString[0]
 		index, _ := strconv.Atoi(indexString)
-		inputString = inputString[strings.Index(inputString, ":")+1:]
-		inputString = inputString[:len(inputString)-1]
+		inputString = inputString[1:]
 		distance := 0.0
-		tempString := strings.Split(inputString, " ")
-		for i, element := range tempString {
+		for i, element := range inputString {
 			code, _ := strconv.Atoi(element)
 			distance += pqList[i][code]
 		}
@@ -316,17 +317,22 @@ func main() {
 	kmeans := NewKmeans()
 	start := time.Now()
 	kmeans.createIndex("../csv_data", 1024, 20)
-	kmeans.storeIndex("../data", 1024, "bucket", 20)
+	kmeans.storeIndex("../csv_data", 1024, "bucket", 20)
 	delta := time.Now().Sub(start)
 	fmt.Printf("reset took this amount of time: %s\n", delta)
-	// lijun, _ := loadData("./0_18.txt", 1024)
+
+	// 用于测试Kmeans
+	// lijun, _ := loadData("./0_18.csv", 1024)
 	// vector := NewFloatVector(1024)
 	// for _, floatvector := range(lijun){
 	// 	vector.SetVector(floatvector)
-	// 	index, _, distance  := kmeans.searchVector(*vector, "bucket")
-	// 	fmt.Print(index, distance)
+	// 	index, _, distance  := kmeans.searchVector(*vector, "bucket", 1024)
+	// 	fmt.Print(index, distance,"\n")
 	// }
+	// IvfPQ 索引
 	// kivfPq := NewIvfPQ(8)
+	// kivfPq.createIndex("./bucket", 1024, 20, 20, true)
+	// kivfPq.storeIndex("./", 1024, 20)
 	// for _, floatvector := range(lijun){
 	// 	vector.SetVector(floatvector)
 	// 	index, distance  := kivfPq.searchVector(*vector, 1024, ".")

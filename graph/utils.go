@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -31,7 +30,7 @@ func dirSort(listDirs []string) []string {
 	}
 	sort.Ints(intListDirs)
 	for i, intListDir := range intListDirs {
-		result[i] = strconv.Itoa(intListDir) + ".txt"
+		result[i] = strconv.Itoa(intListDir) + ".csv"
 	}
 
 	return result
@@ -129,7 +128,7 @@ func searchCenter(num int, length int, vectors *floatVectors, codeNum int) *floa
 		vector.SetVector(vectors.vectors[index].vector)
 		center.Append(*vector)
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 500; i++ {
 		neighbor := make([]int, vectors.length)
 		var wg sync.WaitGroup
 		for index, vector := range vectors.vectors {
@@ -175,7 +174,7 @@ func searchCenter(num int, length int, vectors *floatVectors, codeNum int) *floa
 			}(j)
 		}
 		wg.Wait()
-		if i%100 == 0 {
+		if i%50 == 0 {
 			fmt.Printf("聚心%d运行%d次", codeNum, i)
 		}
 	}
@@ -192,17 +191,15 @@ func loadCenter(path string) *floatVectors {
 	}
 	defer inputFile.Close()
 	center := NewFloatVectors()
-	inputReader := bufio.NewReader(inputFile)
+	inputReader := csv.NewReader(inputFile)
 	for {
-		inputString, readerError := inputReader.ReadString('\n')
+		inputString, readerError := inputReader.Read()
 		if readerError == io.EOF {
 			break
 		}
-		inputString = inputString[strings.Index(inputString, ":")+1:]
+		inputString = inputString[1:]
 		inputFloatArray := make([]float64, 0)
-		tempString := strings.Split(inputString, ",")
-		tempString = tempString[:len(tempString)-1]
-		for _, element := range tempString {
+		for _, element := range inputString {
 			inputFloat, _ := strconv.ParseFloat(element, 64)
 			inputFloatArray = append(inputFloatArray, inputFloat)
 		}
@@ -225,21 +222,19 @@ func loadPqcenter(path string, M int) [](*floatVectors) {
 	defer inputFile.Close()
 	center := NewFloatVectors()
 	row := 0
-	inputReader := bufio.NewReader(inputFile)
+	inputReader := csv.NewReader(inputFile)
 	for {
-		inputString, readerError := inputReader.ReadString('\n')
+		inputString, readerError := inputReader.Read()
 		if readerError == io.EOF {
 			break
 		}
-		if inputString == "||\n" {
+		if len(inputString) == 1 {
 			pqCenter[row] = center
 			center = NewFloatVectors()
 			row++
 		} else {
 			inputFloatArray := make([]float64, 0)
-			tempString := strings.Split(inputString, ",")
-			tempString = tempString[:len(tempString)-1]
-			for _, element := range tempString {
+			for _, element := range inputString {
 				inputFloat, _ := strconv.ParseFloat(element, 64)
 				inputFloatArray = append(inputFloatArray, inputFloat)
 			}
