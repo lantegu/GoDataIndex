@@ -1,4 +1,4 @@
 graph/*.out
 graph/bucket/
-data/
+csv_data/
 graph/pqCode/

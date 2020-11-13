@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,13 @@ import (
 	"sync"
 	"time"
 )
+
+// Index 是索引接口，展示索引所需要的功能
+type Index interface {
+	createIndex(path string) string
+	storeIndex(path string) bool
+	searchVector(vector floatVector) (int, floatVector)
+}
 
 func dirSort(listDirs []string) []string {
 	intListDirs := make([]int, len(listDirs))
@@ -29,43 +37,58 @@ func dirSort(listDirs []string) []string {
 	return result
 }
 
-// stringToFloats表示将字符串转换为浮点数组
-func stringToFloats(data string, length int) ([]float64, error) {
-	vector := make([]float64, length)
-	stringSplit := strings.Split(data, ",")
-	stringSplit = stringSplit[:len(stringSplit)-1]
-	for i, element := range stringSplit {
-		if i >= length {
-			return nil, errors.New("vectors' dim error")
+// 获取最近向量 vector表示待比较向量 vectors表示向量组
+func getNeighVector(vector floatVector, pointerVectors *floatVectors, ch chan int) {
+	maxIndex, maxDistance := 0, -100000.0
+	for centerIndex, centerPoint := range pointerVectors.vectors {
+		distance, err := vector.distance(centerPoint)
+		if err != nil {
+			fmt.Print("计算出错")
 		}
+		if distance > maxDistance {
+			maxDistance = distance
+			maxIndex = centerIndex
+		}
+	}
+	ch <- maxIndex
+}
+
+// stringToFloats表示将字符串转换为浮点数组
+func stringToFloats(data []string, length int, splitString string) ([]float64, error) {
+	vector := make([]float64, length)
+	// 按某个字符分割
+	if len(data) > length {
+		return nil, errors.New("vectors' dim error")
+	}
+	for i, element := range data {
 		vectorElement, _ := strconv.ParseFloat(element, 64)
 		vector[i] = vectorElement
 	}
 	return vector, nil
 }
 
-// loadBucket 载入桶 path表示桶路径 length表示桶
+// loadBucket 载入桶 indexs表示Bucket所有数编号， vectors表示buvket所有数的向量组
 func loadBucket(path string, length int) (indexs []int, vectors [][]float64, err error) {
 	indexs = make([]int, 0)
-	inputFile, inputError := os.Open(path)
-	if inputError != nil {
+	csvFile, err := os.Open(path)
+	if err != nil {
 		fmt.Print("文件似乎不存在")
 		return nil, nil, errors.New("Load file error")
 	}
-	defer inputFile.Close()
+	defer csvFile.Close()
 	vectors = make([][]float64, 0)
-	inputReader := bufio.NewReader(inputFile)
+	csvReader := csv.NewReader(csvFile)
 	for {
 		vector := make([]float64, length)
-		inputString, readerError := inputReader.ReadString('\n')
+		inputString, readerError := csvReader.Read()
 		if readerError == io.EOF {
 			break
 		}
-		index := inputString[:strings.Index(inputString, ":")]
-		inputString = inputString[strings.Index(inputString, ":")+1:]
+		index := inputString[0]
+		inputString = inputString[1:]
 		indexInt, _ := strconv.Atoi(index)
 		indexs = append(indexs, indexInt)
-		vector, _ = stringToFloats(inputString, length)
+		vector, _ = stringToFloats(inputString, length, ",")
 		vectors = append(vectors, vector)
 	}
 	return indexs, vectors, nil
@@ -73,42 +96,41 @@ func loadBucket(path string, length int) (indexs []int, vectors [][]float64, err
 
 // path为向量路径， len为向量产生长度
 func loadData(path string, length int) ([][]float64, error) {
-	inputFile, inputError := os.Open(path)
-	if inputError != nil {
+	csvfile, err := os.Open(path)
+	if err != nil {
 		fmt.Print("文件似乎不存在")
 		return nil, errors.New("Load file error")
 	}
-	defer inputFile.Close()
+	defer csvfile.Close()
 	vectors := make([][]float64, 0)
-	inputReader := bufio.NewReader(inputFile)
+	csvReader := csv.NewReader(csvfile)
 	for {
 		vector := make([]float64, length)
-		inputString, readerError := inputReader.ReadString('\n')
+		inputString, readerError := csvReader.Read()
 		if readerError == io.EOF {
 			break
 		}
-		inputString = inputString[strings.Index(inputString, ":")+1 : len(inputString)-1]
-		vector, _ = stringToFloats(inputString, length)
+		vector, _ = stringToFloats(inputString, length, ",")
 		vectors = append(vectors, vector)
 	}
 	return vectors, nil
 }
 
-// 聚类算法不一定要依赖Kmeans流程，其他也要用 num表示聚类点数 length表示向量维度 vectors 表示采样点
+// 寻找聚类中心 num表示聚类点数 length表示向量维度 vectors 表示采样点，codenum为编号，仅用于辅助打印
 // center表示采样结果
 func searchCenter(num int, length int, vectors *floatVectors, codeNum int) *floatVectors {
 	center := NewFloatVectors()
 	// 随机选取num个聚簇点作为初始聚簇中心
 	randArray := make([]int, num)
 	rand.Seed(time.Now().Unix())
-	copy(randArray, rand.Perm(vectors.len)[:num])
+	copy(randArray, rand.Perm(vectors.length)[:num])
 	for _, index := range randArray {
 		vector := NewFloatVector(length)
 		vector.SetVector(vectors.vectors[index].vector)
 		center.Append(*vector)
 	}
-	for i := 0; i < 500; i++ {
-		neighbor := make([]int, vectors.len)
+	for i := 0; i < 5; i++ {
+		neighbor := make([]int, vectors.length)
 		var wg sync.WaitGroup
 		for index, vector := range vectors.vectors {
 			wg.Add(1)
@@ -132,18 +154,27 @@ func searchCenter(num int, length int, vectors *floatVectors, codeNum int) *floa
 		// 重新计算每个簇的中心
 		//count用来存储每个聚簇中心点的个数
 		// 聚簇中心数据清零
-		for j := 0; j < center.len; j++ {
+		for j := 0; j < center.length; j++ {
 			center.vectors[j].resetVector()
 		}
 		count := make([]int, num)
-		// 此处两个函数添加sem并行
 		for j, neigh := range neighbor {
 			count[neigh]++
-			center.vectors[neigh].addVector(vectors.vectors[j])
+			wg.Add(1)
+			go func(j int, neigh int) {
+				defer wg.Done()
+				center.vectors[neigh].addVector(vectors.vectors[j])
+			}(j, neigh)
 		}
-		for j := 0; j < center.len; j++ {
-			center.vectors[j].divVector(count[j])
+		wg.Wait()
+		for j := 0; j < center.length; j++ {
+			wg.Add(1)
+			go func(j int) {
+				defer wg.Done()
+				center.vectors[j].divNum(count[j])
+			}(j)
 		}
+		wg.Wait()
 		if i%100 == 0 {
 			fmt.Printf("聚心%d运行%d次", codeNum, i)
 		}
@@ -151,6 +182,7 @@ func searchCenter(num int, length int, vectors *floatVectors, codeNum int) *floa
 	return center
 }
 
+// 载入聚类中心
 func loadCenter(path string) *floatVectors {
 	inputFile, inputError := os.Open(path)
 	if inputError != nil {
@@ -181,6 +213,7 @@ func loadCenter(path string) *floatVectors {
 	return center
 }
 
+// 载入pq量化中心
 func loadPqcenter(path string, M int) [](*floatVectors) {
 	pqCenter := make([]*floatVectors, M)
 	inputFile, inputError := os.Open(path)

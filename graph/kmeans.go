@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
@@ -56,7 +57,7 @@ func (pointer *Kmeans) createIndex(dataPath string, length int, num int) (string
 	sampling := num * 256 / len(rd)
 	pointer.vectors = NewFloatVectors()
 	var mu sync.Mutex
-	sem := make(semaphore, 2)
+	sem := make(semaphore, 4)
 	for _, fi := range rd {
 		sem.P(1)
 		fmt.Print("start\n")
@@ -104,7 +105,7 @@ func (pointer *Kmeans) searchCenter(num int, length int) error {
 	}
 	vectors := pointer.vectors
 	pointer.center = searchCenter(num, length, vectors, 0)
-	
+
 	return nil
 }
 
@@ -124,6 +125,7 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 		fmt.Print("bucket 已经加载")
 	}
 	count := 0
+	// 对csv文件进行排序，默认是按字符串顺序排序，我们按照数值排序
 	listDirs := make([]string, 0)
 	for _, fi := range rd {
 		listDirs = append(listDirs, fi.Name())
@@ -139,7 +141,6 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 		var wg sync.WaitGroup
 		var mu sync.Mutex
 		for _, floatData := range data {
-			// 这里可以增加并行操作
 			wg.Add(1)
 			go func(floatData []float64) {
 				defer wg.Done()
@@ -161,7 +162,7 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 				bucketIdentifier[maxIndex] = append(bucketIdentifier[maxIndex], count)
 				count++
 				mu.Unlock()
-				if count%5000 == 0 {
+				if count%10000 == 0 {
 					fmt.Printf("编号:%d运行完毕", count)
 				}
 			}(floatData)
@@ -171,18 +172,18 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 			wg.Add(1)
 			go func(i int, bucketVector floatVectors) {
 				defer wg.Done()
-				fmt.Printf("桶长度：%d\n", bucketVector.len)
-				outputFile, outputError := os.OpenFile("./"+bucketPath+"/"+strconv.Itoa(i)+".txt",
+				outputFile, outputError := os.OpenFile("./"+bucketPath+"/"+strconv.Itoa(i)+".csv",
 					os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 				if outputError != nil {
 					fmt.Printf("An error occurred with file opening or creation\n")
 				}
 				defer outputFile.Close()
-				outputWriter := bufio.NewWriter(outputFile)
-				for j := 0; j < bucketVector.len; j++ {
+				outputWriter := csv.NewWriter(outputFile)
+				for j := 0; j < bucketVector.length; j++ {
+					outputstrings := bucketVector.vectorString(j)
+					outputstrings = append([]string {strconv.Itoa(bucketIdentifier[i][j])}, outputstrings...)
 					mu.Lock()
-					outputWriter.WriteString(strconv.Itoa(bucketIdentifier[i][j]) + ":")
-					outputWriter.WriteString(bucketVector.vectorString(j))
+					outputWriter.Write(outputstrings)
 					mu.Unlock()
 				}
 				outputWriter.Flush()
@@ -191,20 +192,19 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 		wg.Wait()
 	}
 
-	// 将每个聚簇点分桶存储
-
 	// 存储中心点
-	outputFile, outputError := os.OpenFile("./"+bucketPath+"/center.txt",
+	outputFile, outputError := os.OpenFile("./"+bucketPath+"/center.csv",
 		os.O_WRONLY|os.O_CREATE, 0666)
 	if outputError != nil {
 		fmt.Printf("An error occurred with file opening or creation\n")
 		return false, nil
 	}
 	defer outputFile.Close()
-	outputWriter := bufio.NewWriter(outputFile)
-	for j := 0; j < pointer.center.len; j++ {
-		outputWriter.WriteString(strconv.Itoa(j) + ":")
-		outputWriter.WriteString(pointer.center.vectorString(j))
+	outputWriter := csv.NewWriter(outputFile)
+	for j := 0; j < pointer.center.length; j++ {
+		outputstrings := pointer.center.vectorString(j)
+		outputstrings = append([]string {strconv.Itoa(j)}, outputstrings...)
+		outputWriter.Write(outputstrings)
 	}
 	outputWriter.Flush()
 	return true, nil
