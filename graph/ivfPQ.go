@@ -292,34 +292,12 @@ func (pointer *IvfPQ) searchVector(inputVector floatVector, length int, root str
 }
 
 func main() {
-	// csvfile, err := os.Open("./0_18.csv")
-	// if err != nil {
-	// 	log.Fatalln("Couldn't open the csv file", err)
-	// }
-	// defer csvfile.Close()
-	// r := csv.NewReader(csvfile)
-	// for {
-	// 	// Read each record from csv
-	// 	record, err := r.Read()
-	// 	if err == io.EOF {
-	// 		break
-	// 	}
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
-
-	// 	fmt.Printf("Record has %d columns.\n", len(record))
-	// 	end  := record[1023]
-	// 	fmt.Print(end)
-	// 	fmt.Printf("%s %s \n", record[0], record[1])
-	// }
 	// kmeans 方法建立索引， 储存索引
 	kmeans := NewKmeans()
 	start := time.Now()
 	kmeans.createIndex("../csv_data", 1024, 20)
 	kmeans.storeIndex("../csv_data", 1024, "bucket", 20)
-	delta := time.Now().Sub(start)
-	fmt.Printf("reset took this amount of time: %s\n", delta)
+	delta1 := time.Now().Sub(start)
 
 	// 用于测试Kmeans
 	// lijun, _ := loadData("./0_18.csv", 1024)
@@ -330,9 +308,13 @@ func main() {
 	// 	fmt.Print(index, distance,"\n")
 	// }
 	// IvfPQ 索引
-	// kivfPq := NewIvfPQ(8)
-	// kivfPq.createIndex("./bucket", 1024, 20, 20, true)
-	// kivfPq.storeIndex("./", 1024, 20)
+	kivfPq := NewIvfPQ(8)
+	start = time.Now()
+	kivfPq.createIndex("./bucket", 1024, 20, 20, true)
+	kivfPq.storeIndex("./", 1024, 20)
+	delta2 := time.Now().Sub(start)
+	fmt.Printf("kmeans took this amount of time: %s\n", delta1)
+	fmt.Printf("ivfpq took this amount of time: %s\n", delta2)
 	// for _, floatvector := range(lijun){
 	// 	vector.SetVector(floatvector)
 	// 	index, distance  := kivfPq.searchVector(*vector, 1024, ".")

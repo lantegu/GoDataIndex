@@ -174,7 +174,7 @@ func searchCenter(num int, length int, vectors *floatVectors, codeNum int) *floa
 			}(j)
 		}
 		wg.Wait()
-		if i%50 == 0 {
+		if i%200 == 0 {
 			fmt.Printf("聚心%d运行%d次", codeNum, i)
 		}
 	}
