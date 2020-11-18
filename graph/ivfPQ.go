@@ -22,18 +22,20 @@ type IvfPQ struct {
 	bucketRoot string          // bucketRoot 为桶位置
 	center     *floatVectors   // center为第一次聚类的聚心
 	pqCenter   []*floatVectors // pqCenter 为用于编码的聚类聚心共有M*pqNum个floatVector
+	residual   bool
 }
 
 // NewIvfPQ 生成一个量化结构体
-func NewIvfPQ(M int) *IvfPQ {
-	return &IvfPQ{M: M}
+func NewIvfPQ(M int, residual bool) *IvfPQ {
+	return &IvfPQ{M: M, residual: residual}
 }
+
 
 // 为一个向量的每一块生成编号
 func (pointer *IvfPQ) getCode(clusterPoint *floatVectors, vector *floatVector, ch chan int) {
 	maxIndex, maxDistance := 0, -100000.0
 	for i, point := range clusterPoint.vectors {
-		distance, err := vector.distance(point)
+		distance, err := vector.distance(point, true)
 		if err != nil {
 			fmt.Print(err)
 		}
@@ -44,6 +46,7 @@ func (pointer *IvfPQ) getCode(clusterPoint *floatVectors, vector *floatVector, c
 	}
 	ch <- maxIndex
 }
+
 
 // dataPath 为数据来源地址（即第一次聚类地址），length为向量维度， num 为桶个数（即第一次聚簇点数），
 // M 为量化分段个数 pqNum为量化的聚簇点, bucketExist 为判断桶是否存在，以及存在则无需建立
@@ -82,13 +85,13 @@ func (pointer *IvfPQ) createIndex(dataPath string, length int, num int, pqNum in
 	sampling := 256
 	sampleData := NewFloatVectors()
 	var mu sync.Mutex
-	sem := make(semaphore, 6)
+	sem := make(semaphore, 2)
 
-	for _, listDir := range listDirs {
+	for i, listDir := range listDirs {
 		// 获取[][]floats格式数据, 采样大小默认为聚簇点*256, sampleData 为采样结果
 		sem.P(1)
 		fmt.Print("start reading bucket\n")
-		go func(listDir string) {
+		go func(i int, listDir string) {
 			defer sem.V(1)
 			_, data, _ := loadBucket("bucket"+"/"+listDir, length)
 			if sampling >= len(data) {
@@ -100,11 +103,14 @@ func (pointer *IvfPQ) createIndex(dataPath string, length int, num int, pqNum in
 			for _, index := range randArray {
 				vector := NewFloatVector(length)
 				vector.SetVector(data[index])
+				if pointer.residual == true{
+					vector.subVector(pointer.center.vectors[i])
+				}
 				mu.Lock()
 				sampleData.Append(*vector)
 				mu.Unlock()
 			}
-		}(listDir)
+		}(i, listDir)
 	}
 	for {
 		if len(sem) == 0 {
@@ -119,9 +125,8 @@ func (pointer *IvfPQ) createIndex(dataPath string, length int, num int, pqNum in
 		go func(i int) {
 			defer sem.V(1)
 			cuttedSampleData, _ := sampleData.cutVectors(dim, i*dim, (i+1)*dim)
-			pointer.pqCenter[i] = searchCenter(num, dim, cuttedSampleData, i)
+			pointer.pqCenter[i] = searchCenter(pqNum, dim, cuttedSampleData, i)
 		}(i)
-		// sampleData得分割在这里 11月4日 停在此处 若聚类没问题  储存完就完事了
 	}
 	for {
 		if len(sem) == 0 {
@@ -151,7 +156,7 @@ func (pointer *IvfPQ) storeIndex(dataPath string, length int, pqnum int) {
 		fmt.Print("编码桶已存在")
 	}
 	var mu sync.RWMutex
-	sem := make(semaphore, 8)
+	sem := make(semaphore, 2)
 	for i, listDir := range listDirs {
 		//为每个桶单独创建文件夹并且编码
 		sem.P(1)
@@ -169,6 +174,10 @@ func (pointer *IvfPQ) storeIndex(dataPath string, length int, pqnum int) {
 			for j, floatData := range data {
 				vector := NewFloatVector(length)
 				vector.SetVector(floatData)
+				// 如果要生成残差版本的编号，这里要采用yi-cyi
+				if pointer.residual == true{
+					vector.subVector(pointer.center.vectors[i])
+				}
 				code := make([]string, pointer.M)
 				var wg sync.WaitGroup
 				for k := 0; k < pointer.M; k++ {
@@ -203,7 +212,7 @@ func (pointer *IvfPQ) storeIndex(dataPath string, length int, pqnum int) {
 			break
 		}
 	}
-	// 保存量化聚簇中心的txt
+	// 保存量化聚簇中心的csv
 	centerFile, centerError := os.OpenFile(dataPath+"/pqCode/"+"center.csv",
 		os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if centerError != nil {
@@ -241,18 +250,11 @@ func (pointer *IvfPQ) searchVector(inputVector floatVector, length int, root str
 	for i := range pqList {
 		pqList[i] = make([]float64, 0)
 	}
-	// 记录输入向量与pa聚心的距离
-	for i := 0; i < pointer.M; i++ {
-		tempvector, _ := inputVector.cutVector(dim, i*dim, (i+1)*dim)
-		for _, vector := range pointer.pqCenter[i].vectors {
-			distance, _ := vector.distance(*tempvector)
-			pqList[i] = append(pqList[i], distance)
-		}
-	}
+
 	// 找到最近粗聚点
 	maxIndex, maxDistance := 0, -100000.0
 	for index, vector := range pointer.center.vectors {
-		distance, err := vector.distance(inputVector)
+		distance, err := vector.distance(inputVector, true)
 		if err != nil {
 			fmt.Print("计算出错")
 		}
@@ -261,6 +263,19 @@ func (pointer *IvfPQ) searchVector(inputVector floatVector, length int, root str
 			maxIndex = index
 		}
 	}
+	// 输入与粗聚点距离
+	dis := maxDistance
+	// 记录输入向量与pa聚心的距离
+	for i := 0; i < pointer.M; i++ {
+		tempvector, _ := inputVector.cutVector(dim, i*dim, (i+1)*dim)
+		for _, vector := range pointer.pqCenter[i].vectors {
+			// 本处得到的是 待查找向量与第i段 第vector个pqcenter的距离
+			distance, _ := vector.distance(*tempvector, true)
+
+			pqList[i] = append(pqList[i], distance)
+		}
+	}
+
 	inputFile, inputError := os.Open(root + "/pqCode/" + strconv.Itoa(maxIndex) + ".csv")
 	if inputError != nil {
 		fmt.Printf("An error occurred on opening the inputfile\n" +
@@ -288,17 +303,79 @@ func (pointer *IvfPQ) searchVector(inputVector floatVector, length int, root str
 			maxIndex = index
 		}
 	}
-	return maxIndex, maxDistance
+	return maxIndex, maxDistance +dis
 }
+
+func (pointer *IvfPQ) testVector(inputVector floatVector, length int, root string) (int, float64) {
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		fmt.Print("文件不存在")
+	}
+	if pointer.center == nil {
+		pointer.center = loadCenter(root + "/bucket/center.csv")
+	}
+	if pointer.pqCenter == nil {
+		pointer.pqCenter = make([]*floatVectors, pointer.M)
+		pointer.pqCenter = loadPqcenter(root+"/pqCode/center.csv", pointer.M)
+	}
+	dim := length / pointer.M
+	pqList := make([][]float64, pointer.M)
+	for i := range pqList {
+		pqList[i] = make([]float64, 0)
+	}
+
+	// 找到最近粗聚点
+	maxIndex, maxDistance := 0, -100000.0
+	for index, vector := range pointer.center.vectors {
+		distance, err := vector.distance(inputVector, true)
+		if err != nil {
+			fmt.Print("计算出错")
+		}
+		if distance > maxDistance {
+			maxDistance = distance
+			maxIndex = index
+		}
+	}
+	// 输入与粗聚点距离
+	dis := maxDistance
+	// 记录输入向量与pa聚心的距离
+	for i := 0; i < pointer.M; i++ {
+		tempvector, _ := inputVector.cutVector(dim, i*dim, (i+1)*dim)
+		for _, vector := range pointer.pqCenter[i].vectors {
+			// 本处得到的是 待查找向量与第i段 第vector个pqcenter的距离
+			distance, _ := vector.distance(*tempvector, true)
+
+			pqList[i] = append(pqList[i], distance)
+		}
+	}
+	// ri
+	x := NewFloatVector(1024)
+	x.SetVector(inputVector.vector)
+	// 此时input为ri
+	inputVector.subVector(pointer.center.vectors[maxIndex])
+	for i := 0; i < pointer.M; i++{
+		tempvector, _ := inputVector.cutVector(dim, i*dim, (i+1)*dim)
+		tempx,_ := x.cutVector(dim, i*dim, (i+1)*dim)
+		tdis,_ := tempvector.distance(*tempx, true)
+		fmt.Printf("第i段x*r:%f\n",tdis)
+		ch := make(chan int)
+		go pointer.getCode(pointer.pqCenter[i], tempvector, ch)
+		tempcode := <-ch
+		pq := pointer.pqCenter[i].vectors[tempcode]
+		pqdis,_ := tempvector.distance(pq, true)
+		fmt.Printf("第一段pq编码：%f\n", pqdis*8)
+	}
+	return maxIndex, maxDistance +dis
+}
+
 
 func main() {
 	// kmeans 方法建立索引， 储存索引
-	kmeans := NewKmeans()
-	start := time.Now()
-	kmeans.createIndex("../csv_data", 1024, 20)
-	kmeans.storeIndex("../csv_data", 1024, "bucket", 20)
-	delta1 := time.Now().Sub(start)
-
+	//kmeans := NewKmeans()
+	// start := time.Now()
+	// kmeans.createIndex("../csv_data", 1024, 20)
+	// kmeans.storeIndex("../csv_data", 1024, "bucket", 20)
+	// delta1 := time.Now().Sub(start)
+	// fmt.Printf("kmeans took this amount of time: %s\n", delta1)
 	// 用于测试Kmeans
 	// lijun, _ := loadData("./0_18.csv", 1024)
 	// vector := NewFloatVector(1024)
@@ -308,16 +385,16 @@ func main() {
 	// 	fmt.Print(index, distance,"\n")
 	// }
 	// IvfPQ 索引
-	kivfPq := NewIvfPQ(8)
-	start = time.Now()
-	kivfPq.createIndex("./bucket", 1024, 20, 20, true)
-	kivfPq.storeIndex("./", 1024, 20)
+	kivfPq := NewIvfPQ(8, true)
+	start := time.Now()
+	kivfPq.createIndex("./bucket", 1024, 20, 100, true)
+	kivfPq.storeIndex("./", 1024, 100)
 	delta2 := time.Now().Sub(start)
-	fmt.Printf("kmeans took this amount of time: %s\n", delta1)
+	// // fmt.Printf("kmeans took this amount of time: %s\n", delta1)
 	fmt.Printf("ivfpq took this amount of time: %s\n", delta2)
 	// for _, floatvector := range(lijun){
 	// 	vector.SetVector(floatvector)
-	// 	index, distance  := kivfPq.searchVector(*vector, 1024, ".")
+	// 	index, distance  := kivfPq.testVector(*vector, 1024, ".")
 	// 	fmt.Printf("索引号：%d, 距离：%f\n", index, distance)
 	// }
 
