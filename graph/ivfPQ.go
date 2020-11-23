@@ -79,10 +79,10 @@ func (pointer *IvfPQ) createIndex(dataPath string, length int, num int, pqNum in
 	listDirs = dirSort(listDirs)
 	pointer.pqCenter = make([]*floatVectors, pointer.M)
 	// 遍历目录 对每个桶做均匀采样
-	sampling := 256
+	sampling := 512
 	sampleData := NewFloatVectors()
 	var mu sync.Mutex
-	sem := make(semaphore, 6)
+	sem := make(semaphore, 4)
 
 	for _, listDir := range listDirs {
 		// 获取[][]floats格式数据, 采样大小默认为聚簇点*256, sampleData 为采样结果
@@ -113,7 +113,7 @@ func (pointer *IvfPQ) createIndex(dataPath string, length int, num int, pqNum in
 		}
 	}
 	//每个采样区划分为八块
-	sem = make(semaphore, 4)
+	sem = make(semaphore, 3)
 	for i := 0; i < pointer.M; i++ {
 		sem.P(1)
 		go func(i int) {
@@ -151,7 +151,7 @@ func (pointer *IvfPQ) storeIndex(dataPath string, length int, pqnum int) {
 		fmt.Print("编码桶已存在")
 	}
 	var mu sync.RWMutex
-	sem := make(semaphore, 8)
+	sem := make(semaphore, 4)
 	for i, listDir := range listDirs {
 		//为每个桶单独创建文件夹并且编码
 		sem.P(1)
@@ -293,11 +293,11 @@ func (pointer *IvfPQ) searchVector(inputVector floatVector, length int, root str
 
 func main() {
 	// kmeans 方法建立索引， 储存索引
-	kmeans := NewKmeans()
-	start := time.Now()
-	kmeans.createIndex("../csv_data", 1024, 20)
-	kmeans.storeIndex("../csv_data", 1024, "bucket", 20)
-	delta1 := time.Now().Sub(start)
+	// kmeans := NewKmeans()
+	// start := time.Now()
+	// kmeans.createIndex("../csv_data", 1024, 20)
+	// kmeans.storeIndex("../csv_data", 1024, "bucket", 20)
+	// delta1 := time.Now().Sub(start)
 
 	// 用于测试Kmeans
 	// lijun, _ := loadData("./0_18.csv", 1024)
@@ -309,12 +309,12 @@ func main() {
 	// }
 	// IvfPQ 索引
 	kivfPq := NewIvfPQ(8)
-	start = time.Now()
-	kivfPq.createIndex("./bucket", 1024, 20, 20, true)
-	kivfPq.storeIndex("./", 1024, 20)
-	delta2 := time.Now().Sub(start)
-	fmt.Printf("kmeans took this amount of time: %s\n", delta1)
-	fmt.Printf("ivfpq took this amount of time: %s\n", delta2)
+	// start = time.Now()
+	kivfPq.createIndex("./bucket", 1024, 20, 100, true)
+	kivfPq.storeIndex("./", 1024, 100)
+	// delta2 := time.Now().Sub(start)
+	// fmt.Printf("kmeans took this amount of time: %s\n", delta1)
+	// fmt.Printf("ivfpq took this amount of time: %s\n", delta2)
 	// for _, floatvector := range(lijun){
 	// 	vector.SetVector(floatvector)
 	// 	index, distance  := kivfPq.searchVector(*vector, 1024, ".")

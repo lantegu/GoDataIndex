@@ -85,7 +85,7 @@ func (pointer *floatVector) distance(pointInputVector floatVector) (float64, err
 	for i := 0; i < pointInputVector.length; i++ {
 		sum += pointer.vector[i] * pointInputVector.vector[i]
 	}
-	return sum / (pointInputVector.GetModule() * pointer.GetModule()), nil
+	return sum, nil
 }
 
 // 将特征向量转化为String类型

@@ -245,3 +245,14 @@ func loadPqcenter(path string, M int) [](*floatVectors) {
 	}
 	return pqCenter
 }
+
+// 随机生成一个(0,1) 的浮点数
+func getRandFloat64() float64{
+	for {
+		rand.Seed(time.Now().UnixNano())
+		randFloat := rand.Float64()
+		if randFloat != 0.0{
+			return randFloat
+		}
+	}
+}
