@@ -147,7 +147,7 @@ func (pointer *Kmeans) storeIndex(dataPath string, length int, bucketPath string
 				vector := NewFloatVector(length)
 				vector.SetVector(floatData)
 				for centerIndex, centerPoint := range pointer.center.vectors {
-					distance, err := vector.distance(centerPoint)
+					distance, err := vector.distance(centerPoint, true)
 					if err != nil {
 						fmt.Print(err)
 					}
@@ -243,7 +243,7 @@ func (pointer *Kmeans) searchVector(inputVector floatVector, root string, length
 	// maxIndex 为获取的桶编号, 先将输入向量特征与聚簇点匹配，找到相对应的桶
 	maxIndex, maxDistance := 0, -100000.0
 	for index, vector := range pointer.center.vectors {
-		distance, err := vector.distance(inputVector)
+		distance, err := vector.distance(inputVector, true)
 		if err != nil {
 			fmt.Print("计算出错")
 		}
@@ -284,7 +284,7 @@ func (pointer *Kmeans) searchVector(inputVector floatVector, root string, length
 		wg.Add(1)
 		go func(index int, vector floatVector) {
 			defer wg.Done()
-			distance, err := vector.distance(inputVector)
+			distance, err := vector.distance(inputVector, true)
 			if err != nil {
 				fmt.Print("计算出错")
 			}

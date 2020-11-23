@@ -40,7 +40,7 @@ func dirSort(listDirs []string) []string {
 func getNeighVector(vector floatVector, pointerVectors *floatVectors, ch chan int) {
 	maxIndex, maxDistance := 0, -100000.0
 	for centerIndex, centerPoint := range pointerVectors.vectors {
-		distance, err := vector.distance(centerPoint)
+		distance, err := vector.distance(centerPoint, true)
 		if err != nil {
 			fmt.Print("计算出错")
 		}
@@ -137,7 +137,7 @@ func searchCenter(num int, length int, vectors *floatVectors, codeNum int) *floa
 				defer wg.Done()
 				maxIndex, maxDistance := 0, -100000.0
 				for centerIndex, centerPoint := range center.vectors {
-					distance, err := vector.distance(centerPoint)
+					distance, err := vector.distance(centerPoint, true)
 					if err != nil {
 						fmt.Print("计算出错")
 					}

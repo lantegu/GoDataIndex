@@ -12,6 +12,15 @@ type floatVector struct {
 	length int
 }
 
+// 浮点向量L2长度
+func (pointer *floatVector) L2Length() float64{
+	sum := 0.0
+	for _, value := range pointer.vector {
+		sum += math.Pow(value, 2)
+	}
+	return sum
+}
+
 // 浮点向量求模
 func (pointer *floatVector) GetModule() float64 {
 	sum := 0.0
@@ -74,7 +83,7 @@ func (pointer *floatVector) SetVector(inputVector []float64) error {
 }
 
 // 求一个向量特征与另一个向量特征的距离
-func (pointer *floatVector) distance(pointInputVector floatVector) (float64, error) {
+func (pointer *floatVector) distance(pointInputVector floatVector, normal bool) (float64, error) {
 	if pointer.GetModule() == 0 || pointInputVector.GetModule() == 0 {
 		return 0, errors.New("存在模为0的向量")
 	}
